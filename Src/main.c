@@ -50,6 +50,10 @@
 #define ZLG_WRITE_ADDRESS 0x10
 #define INF 99999999
 #define IWDG_FEED() HAL_IWDG_Refresh(&IWDG_Handler)
+#define Calc_update() variable_backup_update(&calc_bkp1, &calc_bkp2, &calc_bkp3, calc)
+#define Len_update() variable_backup_update(&len_bkp1, &len_bkp2, &len_bkp3, len)
+#define Flag2_update() variable_backup_update(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, flag2)
+#define Flag3_update() variable_backup_update(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, flag3)
 // 0~D对应0~D, EF分别为 * 和 #
 uint8_t input2sign[0x1D] = {0x10, 0xd, 0xf, 0x0, 0xe, 0x10, 0x10, 0x10, 0x10, 0xc, 0x9, 0x8, 0x7, 0x10, 0x10, 0x10, 0x10, 0xb, 0x6, 0x5, 0x4, 0x10, 0x10, 0x10, 0x10, 0xa, 0x3, 0x2, 0x1};
 // 输出对应字节 0123456789
@@ -153,7 +157,10 @@ void variable_backup_update(struct backup_8 *bkp1, struct backup_8 *bkp2, struct
 void Rx_update();
 void input_int_update();
 void generate_random_uint8_array(uint8_t *arr, uint8_t len);
-void uint8_array_backup_check(flag);
+void uint8_array_backup_check(uint8_t flag);
+void uint8_backup_check(struct backup_8 *bkp1, struct backup_8 *bkp2, struct backup_8 *bkp3, uint8_t flag);
+void input_int_backup_update();
+void backup_check();
 /* USER CODE END 0 */
 
 int main(void)
@@ -180,9 +187,12 @@ int main(void)
 	uint8_t input;
 	if (sign == 302141191) // 热启动
 	{
+		backup_check();
+		sign = 302141191;
 	}
 	else // 冷启动
 	{
+		static_backup_init();
 		backup_init();
 		sign = 302141191;
 	}
@@ -299,6 +309,7 @@ void Clear_Display()
 	flag2 = flag3 = 0;
 	len = 0;
 	memset(Rx_Buffer, 0, 8);
+	backup_init();
 	I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8); // 清除显示
 }
 // 接收到数字
@@ -311,6 +322,9 @@ void Receive_Number(uint8_t input)
 	Rx_Buffer[len] = input;
 	len += 1;
 	I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS + len, Rx_Buffer, len);
+	input_int_update();
+	Rx_update();
+	Len_update();
 }
 // 接收到运算符
 void Receive_Calculating(uint8_t input)
@@ -318,10 +332,14 @@ void Receive_Calculating(uint8_t input)
 	if (flag2 == 0) // 接受到运算符且参数未满
 	{
 		calc = input; // 保存运算符
+		Calc_update();
 		memset(Rx_Buffer, 0, 8);
+		Rx_update();
 		I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
 		len = 0;
 		flag2 = 1;
+		Len_update();
+		Flag2_update();
 	}
 }
 // 结果处理
@@ -330,6 +348,7 @@ void Result_Handle()
 	if (flag2 != 1)
 		return; // 参数未满
 	flag3 = 1;
+	Flag3_update();
 	uint32_t result;
 	switch (calc)
 	{
@@ -338,18 +357,19 @@ void Result_Handle()
 		flag3 += input_int[0] <= INF;		  // 结果是否超出范围
 		break;
 	case 0xb:
-		flag3 = input_int[0] >= input_int[1];
-		result += input_int[0] - input_int[1]; // 减法
+		flag3 += input_int[0] >= input_int[1];
+		result = input_int[0] - input_int[1]; // 减法
 		break;
 	case 0xc:
-		flag3 = INF / input_int[1] > input_int[0];
-		result += input_int[0] * input_int[1]; // 乘法
+		flag3 += INF / input_int[1] > input_int[0];
+		result = input_int[0] * input_int[1]; // 乘法
 		break;
 	case 0xd:
-		flag3 = input_int[1] != 0;
-		result += input_int[0] / input_int[1]; // 除法
+		flag3 += input_int[1] != 0;
+		result = input_int[0] / input_int[1]; // 除法
 		break;
 	}
+	Flag3_update();
 	// printf("%d\t", flag3);
 	if (flag3 == 2) // 结果合法
 	{
@@ -369,6 +389,7 @@ void Result_Handle()
 			Rx_Buffer[len - i - 1] ^= Rx_Buffer[i];
 			Rx_Buffer[i] ^= Rx_Buffer[len - i - 1];
 		}
+		Rx_update();
 		I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
 	}
 	else // 结果不合法
@@ -447,16 +468,15 @@ void input_int_update()
 // 备份初始化
 void backup_init()
 {
-	static_backup_init();
-	variable_backup_update(&len_bkp1, &len_bkp2, &len_bkp3, len);
-	variable_backup_update(&calc_bkp1, &calc_bkp2, &calc_bkp3, calc);
-	variable_backup_update(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, flag1);
-	variable_backup_update(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, flag2);
+	Len_update();
+	Calc_update();
+	Flag2_update();
+	Flag3_update();
 	Rx_update();
 	input_int_update();
 }
 // 字节数组备份校验 0:input2sign  1:output_char  2:Rx_BUffer
-void uint8_array_backup_check(flag)
+void uint8_array_backup_check(uint8_t flag)
 {
 	uint8_t *bkp1, *bkp2, *bkp3, *right;
 	uint8_t *checksum1, *checksum2, *checksum3, len;
@@ -531,33 +551,9 @@ void uint8_array_backup_check(flag)
 	}
 }
 // 字节备份检验	0:len  1:calc  2:flag2  3:flag3
-void uint8_backup_check(flag)
+void uint8_backup_check(struct backup_8 *bkp1, struct backup_8 *bkp2, struct backup_8 *bkp3, uint8_t flag)
 {
-	struct backup_8 *bkp1, *bkp2, *bkp3, *right;
-	if (!flag)
-	{
-		bkp1 = &len_bkp1;
-		bkp2 = &len_bkp2;
-		bkp3 = &len_bkp3;
-	}
-	else if (flag == 1)
-	{
-		bkp1 = &calc_bkp1;
-		bkp2 = &calc_bkp2;
-		bkp3 = &calc_bkp3;
-	}
-	else if (flag == 2)
-	{
-		bkp1 = &flag2_bkp1;
-		bkp2 = &flag2_bkp2;
-		bkp3 = &flag2_bkp3;
-	}
-	else
-	{
-		bkp1 = &flag3_bkp1;
-		bkp2 = &flag3_bkp2;
-		bkp3 = &flag3_bkp3;
-	}
+	struct backup_8 *right;
 	uint8_t f1, f2, f3;
 	f1 = check_uint8_array(bkp1->data, 1, bkp1->checksum, 1);
 	f2 = check_uint8_array(bkp2->data, 1, bkp2->checksum, 1);
@@ -637,6 +633,14 @@ void input_int_backup_update()
 // 备份检验
 void backup_check()
 {
+	uint8_array_backup_check(0);
+	uint8_array_backup_check(1);
+	uint8_array_backup_check(2);
+	uint8_backup_check(&len_bkp1, &len_bkp2, &len_bkp3, 0);
+	uint8_backup_check(&calc_bkp1, &calc_bkp2, &calc_bkp3, 1);
+	uint8_backup_check(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, 2);
+	uint8_backup_check(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, 3);
+	input_int_backup_update();
 }
 // 校验字节数组		0:计算校验和 1:检验校验和
 uint8_t check_uint8_array(uint8_t *arr, uint8_t len, uint8_t checksum, uint8_t type)
