@@ -217,6 +217,11 @@ int main(void)
 			flag1 = 0;
 			input = Safe_Read();
 			last_input_time = HAL_GetTick();
+			if (last_input_time - last_free_time > 10000) // 连续输入10s以上，重启
+			{
+				sign = 0;
+				RESET();
+			}
 			Random_Delay(10);
 
 			if (input > 0x1C || input == 0x0) // 输入不合法
@@ -442,29 +447,49 @@ void IWDG_Init(uint8_t prer, uint16_t rlr)
 // 静态备份初始化
 void static_backup_init()
 {
-	uint8_array_copy(input2sign_bkp1, input2sign, 0x1D);
-	input2sign_bkp1_checksum = check_uint8_array(input2sign_bkp1, 0x1D, 0, 0);
-	uint8_array_copy(input2sign_bkp2, input2sign, 0x1D);
-	input2sign_bkp2_checksum = check_uint8_array(input2sign_bkp2, 0x1D, 0, 0);
-	uint8_array_copy(input2sign_bkp3, input2sign, 0x1D);
-	input2sign_bkp3_checksum = check_uint8_array(input2sign_bkp3, 0x1D, 0, 0);
-
-	uint8_array_copy(output_char_bkp1, output_char, 0xa);
-	output_char_bkp1_checksum = check_uint8_array(output_char_bkp1, 0xa, 0, 0);
-	uint8_array_copy(output_char_bkp2, output_char, 0xa);
-	output_char_bkp2_checksum = check_uint8_array(output_char_bkp2, 0xa, 0, 0);
-	uint8_array_copy(output_char_bkp3, output_char, 0xa);
-	output_char_bkp3_checksum = check_uint8_array(output_char_bkp3, 0xa, 0, 0);
+	uint8_t i = rand() & 1;
+	if (i == 0)
+	{
+		uint8_array_copy(input2sign_bkp1, input2sign, 0x1D);
+		input2sign_bkp1_checksum = check_uint8_array(input2sign_bkp1, 0x1D, 0, 0);
+		uint8_array_copy(input2sign_bkp2, input2sign, 0x1D);
+		input2sign_bkp2_checksum = check_uint8_array(input2sign_bkp2, 0x1D, 0, 0);
+		uint8_array_copy(input2sign_bkp3, input2sign, 0x1D);
+		input2sign_bkp3_checksum = check_uint8_array(input2sign_bkp3, 0x1D, 0, 0);
+	}
+	else
+	{
+		uint8_array_copy(output_char_bkp1, output_char, 0xa);
+		output_char_bkp1_checksum = check_uint8_array(output_char_bkp1, 0xa, 0, 0);
+		uint8_array_copy(output_char_bkp2, output_char, 0xa);
+		output_char_bkp2_checksum = check_uint8_array(output_char_bkp2, 0xa, 0, 0);
+		uint8_array_copy(output_char_bkp3, output_char, 0xa);
+		output_char_bkp3_checksum = check_uint8_array(output_char_bkp3, 0xa, 0, 0);
+	}
 }
 // uint8_t备份更新
 void variable_backup_update(struct backup_8 *bkp1, struct backup_8 *bkp2, struct backup_8 *bkp3, uint8_t data)
 {
-	bkp1->data[0] = data;
-	bkp1->checksum = check_uint8_array(bkp1->data, 1, 0, 0);
-	bkp2->data[0] = data;
-	bkp2->checksum = check_uint8_array(bkp2->data, 1, 0, 0);
-	bkp3->data[0] = data;
-	bkp3->checksum = check_uint8_array(bkp3->data, 1, 0, 0);
+	uint8_t i, order[3];
+	generate_random_uint8_array(order, 3);
+	for (i = 0; i < 3; i++)
+	{
+		switch (order[i])
+		{
+		case 0:
+			bkp1->data[0] = data;
+			bkp1->checksum = check_uint8_array(bkp1->data, 1, 0, 0);
+			break;
+		case 1:
+			bkp2->data[0] = data;
+			bkp2->checksum = check_uint8_array(bkp2->data, 1, 0, 0);
+			break;
+		case 2:
+			bkp3->data[0] = data;
+			bkp3->checksum = check_uint8_array(bkp3->data, 1, 0, 0);
+			break;
+		}
+	}
 }
 // Rx_Buffer更新
 void Rx_update()
@@ -489,12 +514,32 @@ void input_int_update()
 // 备份初始化
 void backup_init()
 {
-	Len_update();
-	Calc_update();
-	Flag2_update();
-	Flag3_update();
-	Rx_update();
-	input_int_update();
+	uint8_t i, order[6];
+	generate_random_uint8_array(order, 6);
+	for (i = 0; i < 6; i++)
+	{
+		switch (order[i])
+		{
+		case 0:
+			Len_update();
+			break;
+		case 1:
+			Calc_update();
+			break;
+		case 2:
+			Flag2_update();
+			break;
+		case 3:
+			Flag3_update();
+			break;
+		case 4:
+			Rx_update();
+			break;
+		case 5:
+			input_int_update();
+			break;
+		}
+	}
 }
 // 字节数组备份校验 0:input2sign  1:output_char  2:Rx_BUffer
 void uint8_array_backup_check(uint8_t flag)
@@ -654,14 +699,38 @@ void input_int_backup_update()
 // 备份检验
 void backup_check()
 {
-	uint8_array_backup_check(0);
-	uint8_array_backup_check(1);
-	uint8_array_backup_check(2);
-	uint8_backup_check(&len_bkp1, &len_bkp2, &len_bkp3, 0);
-	uint8_backup_check(&calc_bkp1, &calc_bkp2, &calc_bkp3, 1);
-	uint8_backup_check(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, 2);
-	uint8_backup_check(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, 3);
-	input_int_backup_update();
+	uint8_t order[8], i;
+	generate_random_uint8_array(order, 8);
+	for (i = 0; i < 8; i++)
+	{
+		switch (order[i])
+		{
+		case 0:
+			uint8_array_backup_check(0);
+			break;
+		case 1:
+			uint8_array_backup_check(1);
+			break;
+		case 2:
+			uint8_array_backup_check(2);
+			break;
+		case 3:
+			uint8_backup_check(&len_bkp1, &len_bkp2, &len_bkp3, 0);
+			break;
+		case 4:
+			uint8_backup_check(&calc_bkp1, &calc_bkp2, &calc_bkp3, 1);
+			break;
+		case 5:
+			uint8_backup_check(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, 2);
+			break;
+		case 6:
+			uint8_backup_check(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, 3);
+			break;
+		case 7:
+			input_int_backup_update();
+			break;
+		}
+	}
 }
 // 校验字节数组		0:计算校验和 1:检验校验和
 uint8_t check_uint8_array(uint8_t *arr, uint8_t len, uint8_t checksum, uint8_t type)
@@ -701,11 +770,19 @@ void uint32_array_copy(uint32_t *dest, uint32_t *src, uint8_t len)
 	while (len--)
 		dest[len] = src[len];
 }
-// 生成随机数组
+// 生成随机序列
 void generate_random_uint8_array(uint8_t *arr, uint8_t len)
 {
-	while (len--)
-		arr[len] = rand() % len;
+	uint8_t i, j;
+	for (i = 0; i < len; i++)
+		arr[i] = i;
+	for (i = 0; i < len; i++)
+	{
+		j = rand() % len;
+		arr[i] ^= arr[j];
+		arr[j] ^= arr[i];
+		arr[i] ^= arr[j];
+	}
 }
 /* USER CODE END 4 */
 
