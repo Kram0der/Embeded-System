@@ -49,6 +49,8 @@
 #define UINT32_CHECK 0xFFFFFFFF
 #define ZLG_WRITE_ADDRESS 0x10
 #define INF 99999999
+#define RESET() HAL_NVIC_SystemReset()
+#define Random_Delay(x) HAL_Delay(rand() % x)
 #define IWDG_FEED() HAL_IWDG_Refresh(&IWDG_Handler)
 #define Calc_update() variable_backup_update(&calc_bkp1, &calc_bkp2, &calc_bkp3, calc)
 #define Len_update() variable_backup_update(&len_bkp1, &len_bkp2, &len_bkp3, len)
@@ -124,7 +126,7 @@ struct backup_8_arr Rx_Buffer_bkp3 __attribute__((at(0x10002700)));
 
 uint32_t sign __attribute__((at(0x10003000)));
 
-uint8_t flag1 = 0;
+uint8_t flag1 = 0, order = 0;
 uint32_t last_input_time = 0, last_free_time = 0;
 
 // uint8_t len __attribute__(());
@@ -215,11 +217,12 @@ int main(void)
 			flag1 = 0;
 			input = Safe_Read();
 			last_input_time = HAL_GetTick();
+			Random_Delay(10);
 
 			if (input > 0x1C || input == 0x0) // 输入不合法
 				continue;
 			input = input2sign[input]; // 转换为符号
-
+			Random_Delay(10);
 			if (input == 0x10)
 				continue;
 			// printf("%#x\t", input);
@@ -240,7 +243,7 @@ int main(void)
 
 			if (time_diff == 10000)
 				Clear_Display();
-			if (time_diff % 400 == 0) // 300ms刷新一次数码管并喂狗
+			if (time_diff % 400 == 0) // 400ms刷新一次数码管并喂狗
 			{
 				IWDG_FEED();
 				I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
@@ -292,12 +295,15 @@ void SystemClock_Config(void)
 // 安全读取
 uint8_t Safe_Read()
 {
+	if (!order)
+		RESET();
 	uint8_t tmp1 = 0, tmp2 = 0, tmp3 = 0;
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp1, 1);
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp2, 1);
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp3, 1);
 	if (tmp1 == tmp2 && tmp2 == tmp3)
 	{
+		order = 1;
 		return tmp1;
 	}
 	return 0;
@@ -308,6 +314,7 @@ void Clear_Display()
 	input_int[0] = input_int[1] = 0;
 	flag2 = flag3 = 0;
 	len = 0;
+	order = 0;
 	memset(Rx_Buffer, 0, 8);
 	backup_init();
 	I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8); // 清除显示
@@ -315,20 +322,27 @@ void Clear_Display()
 // 接收到数字
 void Receive_Number(uint8_t input)
 {
-	if (len == 8) // 输入已满
-		return;
-	input_int[flag2] = (input_int[flag2] << 3) + (input_int[flag2] << 1) + input; // 保存数字
-	input = output_char[input];
-	Rx_Buffer[len] = input;
-	len += 1;
-	I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS + len, Rx_Buffer, len);
-	input_int_update();
-	Rx_update();
-	Len_update();
+	if (order != 1)
+		RESET();
+	if (len < 8) // 输入未满
+	{
+		input_int[flag2] = (input_int[flag2] << 3) + (input_int[flag2] << 1) + input; // 保存数字
+		input = output_char[input];
+		Rx_Buffer[len] = input;
+		len += 1;
+		Random_Delay(5);
+		I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS + len, Rx_Buffer, len);
+		input_int_update();
+		Rx_update();
+		Len_update();
+	}
+	order = 0;
 }
 // 接收到运算符
 void Receive_Calculating(uint8_t input)
 {
+	if (order != 1)
+		RESET();
 	if (flag2 == 0) // 接受到运算符且参数未满
 	{
 		calc = input; // 保存运算符
@@ -336,66 +350,73 @@ void Receive_Calculating(uint8_t input)
 		memset(Rx_Buffer, 0, 8);
 		Rx_update();
 		I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
+		Random_Delay(5);
 		len = 0;
 		flag2 = 1;
 		Len_update();
 		Flag2_update();
 	}
+	order = 0;
 }
 // 结果处理
 void Result_Handle()
 {
-	if (flag2 != 1)
-		return; // 参数未满
-	flag3 = 1;
-	Flag3_update();
-	uint32_t result;
-	switch (calc)
+	if (order != 1)
+		RESET();
+	if (flag2 == 1) // 运算符和参数已满
 	{
-	case 0xa:
-		result = input_int[0] + input_int[1]; // 加法
-		flag3 += input_int[0] <= INF;		  // 结果是否超出范围
-		break;
-	case 0xb:
-		flag3 += input_int[0] >= input_int[1];
-		result = input_int[0] - input_int[1]; // 减法
-		break;
-	case 0xc:
-		flag3 += INF / input_int[1] > input_int[0];
-		result = input_int[0] * input_int[1]; // 乘法
-		break;
-	case 0xd:
-		flag3 += input_int[1] != 0;
-		result = input_int[0] / input_int[1]; // 除法
-		break;
-	}
-	Flag3_update();
-	// printf("%d\t", flag3);
-	if (flag3 == 2) // 结果合法
-	{
-		uint8_t i;
-		len = 0;
-		// 结果转化为字节
-		for (i = 0; result != 0; i++)
+		flag3 = 1;
+		Flag3_update();
+		uint32_t result;
+		switch (calc)
 		{
-			Rx_Buffer[i] = output_char[result % 10];
-			result /= 10;
-			len++;
+		case 0xa:
+			result = input_int[0] + input_int[1]; // 加法
+			flag3 += input_int[0] <= INF;		  // 结果是否超出范围
+			break;
+		case 0xb:
+			flag3 += input_int[0] >= input_int[1];
+			result = input_int[0] - input_int[1]; // 减法
+			break;
+		case 0xc:
+			flag3 += INF / input_int[1] > input_int[0];
+			result = input_int[0] * input_int[1]; // 乘法
+			break;
+		case 0xd:
+			flag3 += input_int[1] != 0;
+			result = input_int[0] / input_int[1]; // 除法
+			break;
 		}
-		// 结果反转
-		for (i = 0; i < len - i - 1; i++)
+		Flag3_update();
+		// printf("%d\t", flag3);
+		Random_Delay(5);
+		if (flag3 == 2) // 结果合法
 		{
-			Rx_Buffer[i] ^= Rx_Buffer[len - i - 1];
-			Rx_Buffer[len - i - 1] ^= Rx_Buffer[i];
-			Rx_Buffer[i] ^= Rx_Buffer[len - i - 1];
+			uint8_t i;
+			len = 0;
+			// 结果转化为字节
+			for (i = 0; result != 0; i++)
+			{
+				Rx_Buffer[i] = output_char[result % 10];
+				result /= 10;
+				len++;
+			}
+			// 结果反转
+			for (i = 0; i < len - i - 1; i++)
+			{
+				Rx_Buffer[i] ^= Rx_Buffer[len - i - 1];
+				Rx_Buffer[len - i - 1] ^= Rx_Buffer[i];
+				Rx_Buffer[i] ^= Rx_Buffer[len - i - 1];
+			}
+			Rx_update();
+			I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
 		}
-		Rx_update();
-		I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
+		else // 结果不合法
+		{
+			Clear_Display();
+		}
 	}
-	else // 结果不合法
-	{
-		Clear_Display();
-	}
+	order = 0;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
