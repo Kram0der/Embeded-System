@@ -55,7 +55,6 @@
 #define Calc_update() variable_backup_update(&calc_bkp1, &calc_bkp2, &calc_bkp3, calc)
 #define Len_update() variable_backup_update(&len_bkp1, &len_bkp2, &len_bkp3, len)
 #define Flag2_update() variable_backup_update(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, flag2)
-#define Flag3_update() variable_backup_update(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, flag3)
 // 0~D对应0~D, EF分别为 * 和 #
 uint8_t input2sign[0x1D] = {0x10, 0xd, 0xf, 0x0, 0xe, 0x10, 0x10, 0x10, 0x10, 0xc, 0x9, 0x8, 0x7, 0x10, 0x10, 0x10, 0x10, 0xb, 0x6, 0x5, 0x4, 0x10, 0x10, 0x10, 0x10, 0xa, 0x3, 0x2, 0x1};
 // 输出对应字节 0123456789
@@ -63,7 +62,7 @@ uint8_t output_char[0xa] = {0xFC, 0x0C, 0xDA, 0xF2, 0x66, 0xB6, 0xBE, 0xE0, 0xFE
 
 uint32_t input_int[2] = {0};
 uint8_t len = 0, calc = 0;
-uint8_t flag2 = 0, flag3 = 0;
+uint8_t flag2 = 0;
 uint8_t Rx_Buffer[8] = {0};
 
 struct backup_32
@@ -115,10 +114,6 @@ struct backup_8 calc_bkp3 __attribute__((at(0x10002400)));
 struct backup_8 flag2_bkp1 __attribute__((at(0x10000500)));
 struct backup_8 flag2_bkp2 __attribute__((at(0x10001500)));
 struct backup_8 flag2_bkp3 __attribute__((at(0x10002500)));
-
-struct backup_8 flag3_bkp1 __attribute__((at(0x10000600)));
-struct backup_8 flag3_bkp2 __attribute__((at(0x10001600)));
-struct backup_8 flag3_bkp3 __attribute__((at(0x10002600)));
 
 struct backup_8_arr Rx_Buffer_bkp1 __attribute__((at(0x10000700)));
 struct backup_8_arr Rx_Buffer_bkp2 __attribute__((at(0x10001700)));
@@ -232,7 +227,7 @@ int main(void)
 				continue;
 			// printf("%#x\t", input);
 
-			if (input == 0xf || flag3) // 接受到清除键或者运算完成
+			if (input == 0xf || flag2 >= 2) // 接受到清除键或者运算完成
 				Clear_Display();
 			else if (input <= 0x9) // 接受到数字
 				Receive_Number(input);
@@ -251,6 +246,7 @@ int main(void)
 			if (time_diff % 400 == 0) // 400ms刷新一次数码管并喂狗
 			{
 				IWDG_FEED();
+				uint8_array_backup_check(2);
 				I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
 			}
 			HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
@@ -317,7 +313,7 @@ uint8_t Safe_Read()
 void Clear_Display()
 {
 	input_int[0] = input_int[1] = 0;
-	flag2 = flag3 = 0;
+	flag2 = 0;
 	len = 0;
 	order = 0;
 	memset(Rx_Buffer, 0, 8);
@@ -329,7 +325,7 @@ void Receive_Number(uint8_t input)
 {
 	if (order != 1)
 		RESET();
-	if (len < 8) // 输入未满
+	if (len < 8 && flag2 < 2) // 输入未满
 	{
 		input_int[flag2] = (input_int[flag2] << 3) + (input_int[flag2] << 1) + input; // 保存数字
 		input = output_char[input];
@@ -370,32 +366,31 @@ void Result_Handle()
 		RESET();
 	if (flag2 == 1) // 运算符和参数已满
 	{
-		flag3 = 1;
-		Flag3_update();
+		flag2 = 2;
+		Flag2_update();
 		uint32_t result;
 		switch (calc)
 		{
 		case 0xa:
 			result = input_int[0] + input_int[1]; // 加法
-			flag3 += input_int[0] <= INF;		  // 结果是否超出范围
+			flag2 += input_int[0] <= INF;		  // 结果是否超出范围
 			break;
 		case 0xb:
-			flag3 += input_int[0] >= input_int[1];
+			flag2 += input_int[0] >= input_int[1];
 			result = input_int[0] - input_int[1]; // 减法
 			break;
 		case 0xc:
-			flag3 += INF / input_int[1] > input_int[0];
+			flag2 += INF / input_int[1] > input_int[0];
 			result = input_int[0] * input_int[1]; // 乘法
 			break;
 		case 0xd:
-			flag3 += input_int[1] != 0;
+			flag2 += input_int[1] != 0;
 			result = input_int[0] / input_int[1]; // 除法
 			break;
 		}
-		Flag3_update();
-		// printf("%d\t", flag3);
+		Flag2_update();
 		Random_Delay(5);
-		if (flag3 == 2) // 结果合法
+		if (flag2 == 3) // 结果合法
 		{
 			uint8_t i;
 			len = 0;
@@ -514,9 +509,9 @@ void input_int_update()
 // 备份初始化
 void backup_init()
 {
-	uint8_t i, order[6];
-	generate_random_uint8_array(order, 6);
-	for (i = 0; i < 6; i++)
+	uint8_t i, order[5];
+	generate_random_uint8_array(order, 5);
+	for (i = 0; i < 5; i++)
 	{
 		switch (order[i])
 		{
@@ -530,12 +525,9 @@ void backup_init()
 			Flag2_update();
 			break;
 		case 3:
-			Flag3_update();
-			break;
-		case 4:
 			Rx_update();
 			break;
-		case 5:
+		case 4:
 			input_int_update();
 			break;
 		}
@@ -616,7 +608,7 @@ void uint8_array_backup_check(uint8_t flag)
 		break;
 	}
 }
-// 字节备份检验	0:len  1:calc  2:flag2  3:flag3
+// 字节备份检验	0:len  1:calc  2:flag2
 void uint8_backup_check(struct backup_8 *bkp1, struct backup_8 *bkp2, struct backup_8 *bkp3, uint8_t flag)
 {
 	struct backup_8 *right;
@@ -655,9 +647,6 @@ void uint8_backup_check(struct backup_8 *bkp1, struct backup_8 *bkp2, struct bac
 		break;
 	case 2:
 		flag2 = right->data[0];
-		break;
-	case 3:
-		flag3 = right->data[0];
 		break;
 	}
 }
@@ -699,9 +688,9 @@ void input_int_backup_update()
 // 备份检验
 void backup_check()
 {
-	uint8_t order[8], i;
-	generate_random_uint8_array(order, 8);
-	for (i = 0; i < 8; i++)
+	uint8_t order[7], i;
+	generate_random_uint8_array(order, 7);
+	for (i = 0; i < 7; i++)
 	{
 		switch (order[i])
 		{
@@ -724,9 +713,6 @@ void backup_check()
 			uint8_backup_check(&flag2_bkp1, &flag2_bkp2, &flag2_bkp3, 2);
 			break;
 		case 6:
-			uint8_backup_check(&flag3_bkp1, &flag3_bkp2, &flag3_bkp3, 3);
-			break;
-		case 7:
 			input_int_backup_update();
 			break;
 		}
