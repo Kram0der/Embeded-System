@@ -83,43 +83,37 @@ struct backup_8_arr
 	uint8_t checksum;
 };
 
-uint8_t input2sign_bkp1[0x1D] __attribute__((at(0x10000000)));
-uint8_t input2sign_bkp2[0x1D] __attribute__((at(0x10001000)));
-uint8_t input2sign_bkp3[0x1D] __attribute__((at(0x10002000)));
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp1[0x1D];
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp1_checksum;
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp1[0xa];
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp1_checksum;
+__attribute__((section(".uninit"), zero_init)) struct backup_32 input_int_bkp1;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 len_bkp1;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 calc_bkp1;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 flag2_bkp1;
+__attribute__((section(".uninit"), zero_init)) struct backup_8_arr Rx_Buffer_bkp1;
 
-uint8_t input2sign_bkp1_checksum __attribute__((at(0x10000030)));
-uint8_t input2sign_bkp2_checksum __attribute__((at(0x10001030)));
-uint8_t input2sign_bkp3_checksum __attribute__((at(0x10002030)));
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp2[0x1D];
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp2_checksum;
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp2[0xa];
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp2_checksum;
+__attribute__((section(".uninit"), zero_init)) struct backup_32 input_int_bkp2;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 len_bkp2;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 calc_bkp2;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 flag2_bkp2;
+__attribute__((section(".uninit"), zero_init)) struct backup_8_arr Rx_Buffer_bkp2;
 
-uint8_t output_char_bkp1[0xa] __attribute__((at(0x10000100)));
-uint8_t output_char_bkp2[0xa] __attribute__((at(0x10001100)));
-uint8_t output_char_bkp3[0xa] __attribute__((at(0x10002100)));
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp3[0x1D];
+__attribute__((section(".uninit"), zero_init)) uint8_t input2sign_bkp3_checksum;
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp3[0xa];
+__attribute__((section(".uninit"), zero_init)) uint8_t output_char_bkp3_checksum;
+__attribute__((section(".uninit"), zero_init)) struct backup_32 input_int_bkp3;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 len_bkp3;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 calc_bkp3;
+__attribute__((section(".uninit"), zero_init)) struct backup_8 flag2_bkp3;
+__attribute__((section(".uninit"), zero_init)) struct backup_8_arr Rx_Buffer_bkp3;
 
-uint8_t output_char_bkp1_checksum __attribute__((at(0x10000130)));
-uint8_t output_char_bkp2_checksum __attribute__((at(0x10001130)));
-uint8_t output_char_bkp3_checksum __attribute__((at(0x10002130)));
-
-struct backup_32 input_int_bkp1 __attribute__((at(0x10000200)));
-struct backup_32 input_int_bkp2 __attribute__((at(0x10001200)));
-struct backup_32 input_int_bkp3 __attribute__((at(0x10002200)));
-
-struct backup_8 len_bkp1 __attribute__((at(0x10000300)));
-struct backup_8 len_bkp2 __attribute__((at(0x10001300)));
-struct backup_8 len_bkp3 __attribute__((at(0x10002300)));
-
-struct backup_8 calc_bkp1 __attribute__((at(0x10000400)));
-struct backup_8 calc_bkp2 __attribute__((at(0x10001400)));
-struct backup_8 calc_bkp3 __attribute__((at(0x10002400)));
-
-struct backup_8 flag2_bkp1 __attribute__((at(0x10000500)));
-struct backup_8 flag2_bkp2 __attribute__((at(0x10001500)));
-struct backup_8 flag2_bkp3 __attribute__((at(0x10002500)));
-
-struct backup_8_arr Rx_Buffer_bkp1 __attribute__((at(0x10000700)));
-struct backup_8_arr Rx_Buffer_bkp2 __attribute__((at(0x10001700)));
-struct backup_8_arr Rx_Buffer_bkp3 __attribute__((at(0x10002700)));
-
-uint32_t sign __attribute__((at(0x10003000)));
+__attribute__((section(".uninit"), zero_init)) uint32_t sign;
 
 uint8_t flag1 = 0, order = 0;
 uint32_t last_input_time = 0, last_free_time = 0;
@@ -189,6 +183,7 @@ int main(void)
 	}
 	else // 冷启动
 	{
+		HAL_Delay(200);
 		static_backup_init();
 		backup_init();
 		sign = 302141191;
@@ -246,7 +241,7 @@ int main(void)
 			if (time_diff % 400 == 0) // 400ms刷新一次数码管并喂狗
 			{
 				IWDG_FEED();
-				uint8_array_backup_check(2);
+				backup_check();
 				I2C_ZLG7290_Write(&hi2c1, 0x70, ZLG_WRITE_ADDRESS, Rx_Buffer, 8);
 			}
 			HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
@@ -302,10 +297,12 @@ uint8_t Safe_Read()
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp1, 1);
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp2, 1);
 	I2C_ZLG7290_Read(&hi2c1, 0x71, 0x01, &tmp3, 1);
-	if (tmp1 == tmp2 && tmp2 == tmp3)
+	if (tmp1 == tmp2 || tmp2 == tmp3 || tmp1 == tmp3)
 	{
 		order = 1;
-		return tmp1;
+		if (tmp1 == tmp2)
+			return tmp1;
+		return tmp3;
 	}
 	return 0;
 }
@@ -368,28 +365,37 @@ void Result_Handle()
 	{
 		flag2 = 2;
 		Flag2_update();
-		uint32_t result;
+		uint32_t result1, result2;
 		switch (calc)
 		{
 		case 0xa:
-			result = input_int[0] + input_int[1]; // 加法
-			flag2 += input_int[0] <= INF;		  // 结果是否超出范围
+			result1 = input_int[0] + input_int[1]; // 加法
+			result2 = input_int[0] + input_int[1];
+			flag2 += input_int[0] <= INF; // 结果是否超出范围
 			break;
 		case 0xb:
 			flag2 += input_int[0] >= input_int[1];
-			result = input_int[0] - input_int[1]; // 减法
+			result1 = input_int[0] - input_int[1]; // 减法
+			result2 = input_int[0] - input_int[1];
 			break;
 		case 0xc:
 			flag2 += INF / input_int[1] > input_int[0];
-			result = input_int[0] * input_int[1]; // 乘法
+			result1 = input_int[0] * input_int[1]; // 乘法
+			result2 = input_int[0] * input_int[1];
 			break;
 		case 0xd:
 			flag2 += input_int[1] != 0;
-			result = input_int[0] / input_int[1]; // 除法
+			result1 = input_int[0] / input_int[1]; // 除法
+			result2 = input_int[0] / input_int[1];
 			break;
 		}
 		Flag2_update();
 		Random_Delay(5);
+		if (result1 != result2)
+		{
+			sign = 0;
+			RESET();
+		}
 		if (flag2 == 3) // 结果合法
 		{
 			uint8_t i;
